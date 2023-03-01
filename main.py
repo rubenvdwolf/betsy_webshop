@@ -1,7 +1,7 @@
 __winc_id__ = "d7b474e9b3a54d23bca54879a4f1855b"
 __human_name__ = "Betsy Webshop"
 
-from models import (db, User, Address, UserAddresses, Tag, Product, UsersOwnProducts, Transaction)
+from models import (db, User, Address, UserAddresses, Tag, Product, ProductTag, UsersOwnProducts, Transaction)
 from peewee import *
 from fuzzywuzzy import process
 import os
@@ -48,11 +48,11 @@ def list_user_products(user_id):
     else:
         print(user_products)
 
-def list_products_per_tag(tag_id):
+def list_products_per_tag(tag):
     found_products = []
     
     #Select products and join the Tag model, filter on products that have the tag and add those to found_products
-    for product in Product.select().join(Tag).where(fn.LOWER(Tag.tag) == tag_id.lower()):
+    for product in Product.select().join(ProductTag).join(Tag).where(fn.LOWER(Tag.tag) == tag.lower()):
         found_products.append(product.name)
     
     #print list of products if they exist
@@ -61,16 +61,20 @@ def list_products_per_tag(tag_id):
     else:
         print(found_products)
 
-def add_product_to_catalog(user_id, product):    
+def add_product_to_catalog(user_id, product, tag_name):
     # check if tag exists and create product, else create tag and create product
-    tag_name = product[2]
     if not Tag.select().where(Tag.tag == tag_name).exists():
         Tag.create(tag=tag_name)
-        Product.create(name=product[0], description=product[1], tag_id=tag, price_per_unit=product[3], amount_in_stock=product[4])
+        tag = Tag.get(Tag.tag == tag_name)
+        Product.create(name=product[0], description=product[1], price_per_unit=product[2], amount_in_stock=product[3])
+        product_id = Product.get(Product.name == product[0])
+        ProductTag.create(tag_id=tag, product_id=product_id)
     else:
         tag = Tag.get(Tag.tag == tag_name)
-        Product.create(name=product[0], description=product[1], tag_id=tag, price_per_unit=product[3], amount_in_stock=product[4])
-    
+        Product.create(name=product[0], description=product[1], price_per_unit=product[2], amount_in_stock=product[3])
+        product_id = Product.get(Product.name == product[0])
+        ProductTag.create(tag_id=tag, product_id=product_id)
+
     # get user and product
     user = User.get(User.id == user_id)
     new_product = Product.get(Product.name == product[0])
@@ -84,6 +88,9 @@ def remove_product(product_id):
     
     #remove connection between user an product
     UsersOwnProducts.delete().where(UsersOwnProducts.product_id == product_id).execute()
+
+    #remove connection between product and tag
+    ProductTag.delete().where(ProductTag.product_id == product_id).execute()
 
 def update_stock(product_id, new_quantity):
     #remove product from a user
@@ -118,7 +125,7 @@ def populate_test_database():
     db.connect()
     
     # create tables
-    models = [User, Address, UserAddresses, Tag, Product, UsersOwnProducts, Transaction]
+    models = [User, Address, UserAddresses, Tag, Product, ProductTag, UsersOwnProducts, Transaction]
     db.create_tables(models)
 
     # add users
@@ -164,15 +171,27 @@ def populate_test_database():
 
     # add products
     products = [
-        ('Bruine Schoenen', 'Hele mooie bruine schoenen!', 1, 25.99, 1),
-        ('Keyboard', 'Degelijke Logitech keyboard', 2, 10.00, 2),
-        ('Pen', 'Goed schrijvende pen', 3, 3.00, 20),
-        ('Kicks', 'Nieuwe schonen van Asics, gewonnen bij een kansspel', 1, 37.00, 1)
+        ('Bruine Schoenen', 'Hele mooie bruine schoenen!', 25.99, 1),
+        ('Keyboard', 'Degelijke Logitech keyboard', 10.00, 2),
+        ('Pen', 'Goed schrijvende pen', 3.00, 20),
+        ('Kicks', 'Nieuwe schonen van Asics, gewonnen bij een kansspel', 37.00, 1)
     ]
-    for name, description, tag, price_per_unit, amount_in_stock in products:
-        tag_id = Tag.get(Tag.id == tag)
-        Product.create(name=name, description=description, tag_id=tag_id, price_per_unit=price_per_unit, amount_in_stock=amount_in_stock)
+    for name, description, price_per_unit, amount_in_stock in products:
+        Product.create(name=name, description=description, price_per_unit=price_per_unit, amount_in_stock=amount_in_stock)
     print('Products added!')
+
+    # connect products to tags
+    product_tags = [
+        (1, 1),
+        (2, 2),
+        (3, 3),
+        (4, 1)
+    ]
+    for product, tag in product_tags:
+        product_id = Product.get(Product.id == product)
+        tag_id = Tag.get(Tag.id == tag)
+        ProductTag.create(product_id=product_id, tag_id=tag_id)
+    print('ProductTags added!')
 
     # add users own products
     user_own_products = [
@@ -187,9 +206,11 @@ def populate_test_database():
         UsersOwnProducts.create(user_id=user_id, product_id=product_id)
     print('UserOwnProducts added!')
 
+    #close the database
+    db.close()
+
 def delete_database():
     cwd = os.getcwd()
     database_path = os.path.join(cwd, "betsydb.db")
     if os.path.exists(database_path):
         os.remove(database_path)
-
